@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Run Python in Browser</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.18.1/full/pyodide.js"></script>
+</head>
+<body>
+    <h1>Run Python in Browser</h1>
+    <pre id="output"></pre>
+    <script>
+        async function main() {
+            // Load Pyodide
+            let pyodide = await loadPyodide();
+            console.log("Pyodide loaded");
+
+            // Python code
+            let pythonCode = `
+import asyncio
+import json
+import uuid
+
+# Simulated pyshorteners using a simple function
+def shorten_url(url):
+    return url
+
+async def search_and_send_song(song_query, room_name, websocket):
+    try:
+        song_details = await search_song(song_query)
+        audio_file = await download_convert_audio(song_details['url'])
+        if audio_file:
+            shortened_audio_url = shorten_url(audio_file)
+            await websocket.send(json.dumps({
+                "handler": "room_message",
+                "type": "audio",
+                "id": str(uuid.uuid4()),
+                "body": f"Here's the song you requested: {song_details['title']}\n\nDescription: {song_details['description']}",
+                "room": room_name,
+                "url": shortened_audio_url,
+                "length": '0',
+                "thumbnail": song_details['thumbnail'],
+                "title": song_details['title'],
+                "description": song_details['description']
+            }))
+            return shortened_audio_url
+        else:
+            print(f"Failed to convert {song_query} to audio.")
+            return None
+    except Exception as e:
+        print(f"Error in searching and sending song: {e}")
+        return None
+
+async def search_song(song_name):
+    # Mock search function
+    return {
+        'url': 'https://example.com/audio.mp3',
+        'title': 'Sample Song',
+        'description': 'A sample song description',
+        'thumbnail': 'https://example.com/thumbnail.jpg'
+    }
+
+async def download_convert_audio(video_url):
+    # Mock download function
+    return video_url
+
+async def connect_websocket(username, password):
+    global is_connected
+    is_connected = False
+    while not is_connected:
+        try:
+            async with pyodide.http.WebSocketClient(websocket_uri) as websocket:
+                is_connected = True
+                print(f"Connected to server as {username}")
+
+                login_message = {
+                    "handler": "login",
+                    "username": username,
+                    "password": password,
+                    "id": str(uuid.uuid4())
+                }
+
+                await websocket.send(json.dumps(login_message))
+                print(f"Sent login message: {login_message}")
+
+                while is_connected:
+                    try:
+                        message = await websocket.recv()
+                        print(f"Received message: {message}")
+                        await process_received_message(message, websocket)
+                    except Exception as e:
+                        print(f"Error in receiving message: {e}")
+
+        except Exception as e:
+            print(f"Error in WebSocket connection: {e}")
+
+        print(f"Reconnecting in {reconnect_interval} seconds...")
+        await asyncio.sleep(reconnect_interval)
+
+async def process_received_message(message, websocket):
+    try:
+        message_obj = json.loads(message)
+        if message_obj:
+            handler = message_obj.get('handler')
+            if handler == 'login_event':
+                await handle_login_event(message_obj, websocket)
+            elif handler == 'room_event':
+                await handle_room_event(message_obj, websocket)
+    except Exception as ex:
+        print(f"Error processing message: {ex}")
+
+async def handle_login_event(message_obj, websocket):
+    global current_username, current_room
+    type_event = message_obj.get('type')
+    if type_event == 'success':
+        current_username = message_obj.get('username')
+        print(f"Login successful as {current_username}")
+        await join_room('homies', websocket)
+
+async def join_room(room_name, websocket):
+    if is_connected:
+        join_message = {
+            "handler": "room_join",
+            "id": str(uuid.uuid4()),
+            "name": room_name
+        }
+        await websocket.send(json.dumps(join_message))
+        print(f"Sent join room message: {join_message}")
+
+async def handle_room_event(message_obj, websocket):
+    global current_username, current_room
+    type_event = message_obj.get('type')
+    if type_event == 'you_joined':
+        print(f"Joined room '{message_obj.get('name')}'")
+
+async def main():
+    username = 'syntaxbot'
+    password = 'reu12345'
+    await connect_websocket(username, password)
+
+asyncio.run(main())
+            `;
+
+            // Run Python code
+            await pyodide.runPythonAsync(pythonCode);
+
+            // Get the output
+            let output = pyodide.globals.get("output");
+            document.getElementById("output").innerText = output;
+        }
+
+        main();
+    </script>
+</body>
+</html>
