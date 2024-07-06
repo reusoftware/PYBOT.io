@@ -3,99 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Run Python in Browser</title>
+    <title>Run Python in Browser with WebSocket</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.18.1/full/pyodide.js"></script>
 </head>
 <body>
     <h1>Run Python in Browser</h1>
     <pre id="output"></pre>
+    <pre id="status"></pre>
     <script>
         async function main() {
             // Load Pyodide
             let pyodide = await loadPyodide();
             console.log("Pyodide loaded");
 
-            // Python code9k
+            document.getElementById("status").innerText = "Pyodide loaded";
+
+            // Python code with WebSocket (simplified)
             let pythonCode = `
 import asyncio
+import websockets
 import json
 import uuid
 
-# Simulated pyshorteners using a simple function
-def shorten_url(url):
-    return url
+# WebSocket connection details
+websocket_uri = "wss://your-websocket-server"  # Replace with your WebSocket server
+current_username = 'syntaxbot'
+current_room = "homies"
+is_connected = False
+status = []
 
-async def search_and_send_song(song_query, room_name, websocket):
-    try:
-        song_details = await search_song(song_query)
-        audio_file = await download_convert_audio(song_details['url'])
-        if audio_file:
-            shortened_audio_url = shorten_url(audio_file)
-            await websocket.send(json.dumps({
-                "handler": "room_message",
-                "type": "audio",
-                "id": str(uuid.uuid4()),
-                "body": f"Here's the song you requested: {song_details['title']}\n\nDescription: {song_details['description']}",
-                "room": room_name,
-                "url": shortened_audio_url,
-                "length": '0',
-                "thumbnail": song_details['thumbnail'],
-                "title": song_details['title'],
-                "description": song_details['description']
-            }))
-            return shortened_audio_url
-        else:
-            print(f"Failed to convert {song_query} to audio.")
-            return None
-    except Exception as e:
-        print(f"Error in searching and sending song: {e}")
-        return None
-
-async def search_song(song_name):
-    # Mock search function
-    return {
-        'url': 'https://example.com/audio.mp3',
-        'title': 'Sample Song',
-        'description': 'A sample song description',
-        'thumbnail': 'https://example.com/thumbnail.jpg'
-    }
-
-async def download_convert_audio(video_url):
-    # Mock download function
-    return video_url
-
-async def connect_websocket(username, password):
+async def connect_websocket():
     global is_connected
-    is_connected = False
     while not is_connected:
         try:
-            async with pyodide.http.WebSocketClient(websocket_uri) as websocket:
+            async with websockets.connect(websocket_uri) as websocket:
                 is_connected = True
-                print(f"Connected to server as {username}")
-
+                status.append(f"Connected to server as {current_username}")
+                
+                # Prepare login message
                 login_message = {
                     "handler": "login",
-                    "username": username,
-                    "password": password,
+                    "username": current_username,
+                    "password": "yourpassword",
                     "id": str(uuid.uuid4())
                 }
 
+                # Send login message
                 await websocket.send(json.dumps(login_message))
-                print(f"Sent login message: {login_message}")
+                status.append(f"Sent login message: {login_message}")
 
+                # Handle incoming messages
                 while is_connected:
                     try:
                         message = await websocket.recv()
-                        print(f"Received message: {message}")
+                        status.append(f"Received message: {message}")
                         await process_received_message(message, websocket)
+                    except websockets.ConnectionClosed:
+                        status.append("Connection closed unexpectedly")
+                        is_connected = False
+                        break
                     except Exception as e:
-                        print(f"Error in receiving message: {e}")
+                        status.append(f"Error in receiving message: {e}")
 
         except Exception as e:
-            print(f"Error in WebSocket connection: {e}")
+            status.append(f"Error in WebSocket connection: {e}")
 
-        print(f"Reconnecting in {reconnect_interval} seconds...")
-        await asyncio.sleep(reconnect_interval)
+        status.append(f"Reconnecting in 5 seconds...")
+        await asyncio.sleep(5)
 
 async def process_received_message(message, websocket):
     try:
@@ -106,15 +80,21 @@ async def process_received_message(message, websocket):
                 await handle_login_event(message_obj, websocket)
             elif handler == 'room_event':
                 await handle_room_event(message_obj, websocket)
+            elif handler == 'room_needs_captcha':
+                status.append("Captcha required")
+            else:
+                status.append(f"Unknown handler: {handler}")
+    except json.JSONDecodeError as json_err:
+        status.append(f"Error decoding JSON: {json_err}")
     except Exception as ex:
-        print(f"Error processing message: {ex}")
+        status.append(f"Error processing message: {ex}")
 
 async def handle_login_event(message_obj, websocket):
-    global current_username, current_room
+    global current_username
     type_event = message_obj.get('type')
     if type_event == 'success':
         current_username = message_obj.get('username')
-        print(f"Login successful as {current_username}")
+        status.append(f"Login successful as {current_username}")
         await join_room('homies', websocket)
 
 async def join_room(room_name, websocket):
@@ -125,28 +105,33 @@ async def join_room(room_name, websocket):
             "name": room_name
         }
         await websocket.send(json.dumps(join_message))
-        print(f"Sent join room message: {join_message}")
+        status.append(f"Sent join room message: {join_message}")
+    else:
+        status.append("Not connected to server")
 
 async def handle_room_event(message_obj, websocket):
-    global current_username, current_room
     type_event = message_obj.get('type')
+    username_event = message_obj.get('username')
+    name_event = message_obj.get('name')
+    role_event = message_obj.get('role')
+    room_event = message_obj.get('room')
+
+    status.append(f"Room event received: {message_obj}")
+
     if type_event == 'you_joined':
-        print(f"Joined room '{message_obj.get('name')}'")
+        status.append(f"Joined room '{name_event}' as {role_event}")
 
-async def main():
-    username = 'syntaxbot'
-    password = 'reu12345'
-    await connect_websocket(username, password)
-
-asyncio.run(main())
+output = asyncio.run(connect_websocket())
+output
             `;
 
-            // Run Python code
-            await pyodide.runPythonAsync(pythonCode);
-
-            // Get the output
-            let output = pyodide.globals.get("output");
-            document.getElementById("output").innerText = output;
+            // Run Python code and get the result
+            let result = await pyodide.runPythonAsync(pythonCode);
+            
+            // Display the result and status messages
+            document.getElementById("output").innerText = result;
+            let statusMessages = await pyodide.globals.get("status").toJs();
+            document.getElementById("status").innerText = statusMessages.join("\\n");
         }
 
         main();
